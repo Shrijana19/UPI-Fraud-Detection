@@ -1,39 +1,68 @@
+import streamlit as st
+import matplotlib.pyplot as plt
+from graph_engine import GraphEngine
+from behavior_engine import BehaviorEngine
+from ml_engine import MLEngine
+from risk_engine import RiskEngine
 import networkx as nx
 
-class GraphEngine:
-    def __init__(self):
-        self.G = nx.DiGraph()
+st.set_page_config(layout="wide")
 
-    def add_transaction(self, sender, receiver, amount):
-        self.G.add_edge(sender, receiver, amount=amount)
+st.title("🛡 Real-Time UPI Fraud Prevention Engine")
 
-    def compute_graph_risk(self, user):
-        if user not in self.G:
-            return 0.0, {}
+graph_engine = GraphEngine()
+behavior_engine = BehaviorEngine()
+ml_engine = MLEngine()
+risk_engine = RiskEngine()
 
-        # High in-degree (mule detection)
-        in_degree = self.G.in_degree(user)
-        max_in_degree = max([self.G.in_degree(n) for n in self.G.nodes()], default=1)
-        in_degree_score = in_degree / max_in_degree if max_in_degree > 0 else 0
+st.sidebar.header("Enter Transaction")
 
-        # Cycle detection
-        cycles = list(nx.simple_cycles(self.G))
-        cycle_flag = 1 if any(user in cycle for cycle in cycles) else 0
+sender = st.sidebar.selectbox("Sender", ["U1", "U2", "U3"])
+receiver = st.sidebar.selectbox("Receiver", ["U1", "U2", "U3"])
+amount = st.sidebar.number_input("Amount", min_value=100)
+hour = st.sidebar.slider("Transaction Hour", 0, 23, 12)
+device = st.sidebar.selectbox("Device", ["Android", "iPhone", "NewDevice"])
+city = st.sidebar.selectbox("City", ["Delhi", "Mumbai", "Kolkata", "Chennai"])
 
-        # PageRank anomaly
-        pagerank = nx.pagerank(self.G) if len(self.G.nodes()) > 0 else {}
-        pagerank_score = pagerank.get(user, 0)
+if st.sidebar.button("Process Transaction"):
 
-        graph_risk = (
-            0.4 * in_degree_score +
-            0.3 * cycle_flag +
-            0.3 * pagerank_score
-        )
+    graph_engine.add_transaction(sender, receiver, amount)
 
-        explanation = {
-            "High in-degree": round(in_degree_score, 2),
-            "Cycle detected": cycle_flag,
-            "PageRank anomaly": round(pagerank_score, 2)
-        }
+    ml_prob = ml_engine.predict_probability(amount)
+    graph_risk, graph_exp = graph_engine.compute_graph_risk(receiver)
+    behavior_risk, behavior_exp = behavior_engine.compute_behavior_risk(
+        sender, amount, hour, device, city
+    )
 
-        return min(graph_risk, 1.0), explanation
+    final_risk = risk_engine.aggregate_risk(ml_prob, graph_risk, behavior_risk)
+    decision = risk_engine.make_decision(final_risk)
+
+    st.subheader("📊 Risk Analysis")
+    st.write(f"ML Probability: {round(ml_prob,2)}")
+    st.write(f"Graph Risk: {round(graph_risk,2)}")
+    st.write(f"Behavior Risk: {round(behavior_risk,2)}")
+    st.write(f"### Final Risk Score: {round(final_risk,2)}")
+
+    if decision == "APPROVED":
+        st.success("✅ Transaction Approved")
+    elif decision == "STEP-UP AUTH":
+        st.warning("🟡 Step-Up Authentication Required")
+    else:
+        st.error("🔴 Transaction Blocked")
+
+    st.subheader("🔍 Risk Breakdown")
+    st.write("Graph Factors:", graph_exp)
+    st.write("Behavior Factors:", behavior_exp)
+
+    st.subheader("🌐 Transaction Graph")
+
+    fig, ax = plt.subplots()
+    colors = []
+    for node in graph_engine.G.nodes():
+        if node == receiver and final_risk > 0.7:
+            colors.append("red")
+        else:
+            colors.append("green")
+
+    nx.draw(graph_engine.G, with_labels=True, node_color=colors, ax=ax)
+    st.pyplot(fig)
